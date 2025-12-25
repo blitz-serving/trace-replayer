@@ -1,0 +1,9 @@
+/target
+/data
+/tmp
+Cargo.lock
+*.csv
+*.jsonl
+*.png
+*.pdf
+*.log
