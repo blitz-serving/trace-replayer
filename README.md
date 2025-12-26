@@ -1,17 +1,15 @@
 
-# Trace-Replayer
+# LLM anonymous Trace-Replayer
 
-**Trace-Replayer** is a Rust-based tool for replaying **Qwen traces** containing block hashes
-(Mooncake traces are also supported), making it easier to use Qwen traces for
-**debugging and performance benchmarking** of LLM serving systems.
+**Trace-Replayer** is a Rust-based tool for replaying **anonymous traces** (e.g., https://github.com/alibaba-edu/qwen-bailian-usagetraces-anon) containing block hashes, making it easier for developers to conduct **debugging and performance benchmarking** of LLM serving systems.
 
-It reconstructs prompts based on **prompt length + block hashes** recorded in the trace,
+At a high-level, it reconstructs **prompts** based on **prompt length + block hashes** recorded in the trace (preserving the same KVCache hit patterns),
 sends requests to specified API endpoints, and records responses for further analysis
 and evaluation.
 
-In practice, **Trace-Replayer** can achieve **100+ QPS and 500,000+ tokens/s**
+**Trace-Replayer** can achieve **100+ QPS and 500,000+ tokens/s**
 while using only **~30 CPU threads**, which is sufficient for stress testing a
-**16-instance Qwen3-30B-A3B deployment**.
+**16/32-instance Qwen3-30B-A3B deployment**.
 
 > **Note**:  
 > The generated prompts are semantically meaningless. Since the original prompt text
@@ -30,8 +28,8 @@ while using only **~30 CPU threads**, which is sufficient for stress testing a
 
 ## Features
 
-- Replay Qwen traces and construct prompts based on block hashes
-- End-to-end request replay for OpenAI and TGI APIs
+- Replay anonymous traces and construct prompts based on block hashes
+- End-to-end request replay using OpenAI and TGI compatible APIs
 - Exports results in **JSONL** format for post-processing
 - High throughput with low resource usage:
   - ~30 CPU threads can saturate a 16-instance model cluster
