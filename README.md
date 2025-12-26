@@ -1,4 +1,3 @@
-
 # LLM anonymous Trace-Replayer
 
 **Trace-Replayer** is a Rust-based tool for replaying **anonymous traces** (e.g., https://github.com/alibaba-edu/qwen-bailian-usagetraces-anon) containing block hashes on backend serving systems (e.g., vLLM, a cluster of vLLM, etc), making it easier for developers to conduct **debugging and performance benchmarking** of LLM serving systems.
@@ -24,7 +23,6 @@ while using only **~30 CPU threads**, which is sufficient for stress testing a
 > You may align versions by updating the `transformers` dependency in `Cargo.toml`
 > to match the inference framework.
 
----
 
 ## Features
 
@@ -37,19 +35,17 @@ while using only **~30 CPU threads**, which is sufficient for stress testing a
 - Highly extensible:
   - Easy to add new APIs, trace formats, and metrics
 
----
 
 ## Supported backend APIs
 
 As long as the backend supports these APIs, we can use the trace replayer to replay the traces. The current supported APIs are: 
 
-- **OpenAI API**: `http://endpoint:port/chat/completion` (non-streaming)
+- **OpenAI API**: `http://endpoint:port/v1/chat/completion` (non-streaming)
 - **TGI (Text Generation Inference)**: `http://endpoint:port/generate` (non-streaming)
 - **AIBrix**
 
----
 
-## Usage
+## Getting Started
 
 ### 1. Install Rust
 
@@ -66,7 +62,6 @@ rustc --version
 cargo --version
 ```
 
----
 
 ### 2. Build
 
@@ -86,18 +81,21 @@ The executable will be generated at:
 path/to/your/repo/target/release/client
 ```
 
----
 
-### 3. Run
+### 3. Init backend and trace-replayer
 
 ```bash
 # Example
+# Init vLLM as target
+vllm serve /path/to/Qwen2.5-7B-Instruct --port 8080
+
+# Now init trace-replayer
 path/to/your/repo/target/release/client \
   --replay-mode \
   --tokenizer /path/to/Qwen2.5-7B-Instruct/tokenizer.json \
   --tokenizer-config /path/to/Qwen2.5-7B-Instruct/tokenizer_config.json \
-  --endpoint http://localhost:58009/generate \
-  --api tgi \
+  --endpoint http://localhost:8080/v1/chat/completions \
+  --api openai \
   --dataset bailian \
   --dataset-path /path/to/qwen_traceA_blksz_16.jsonl \
   --scale-factor 1.5 \
@@ -107,110 +105,15 @@ path/to/your/repo/target/release/client \
   --output-path /path/to/client.jsonl
 ```
 
----
+For a complete list of command-line arguments, please refer to  
+👉 [`docs/arguments.md`](docs/arguments.md)
 
-## Command-line Arguments
-
-### Required Arguments
-
-| Argument             | Type             | Description                                                                                              |
-| -------------------- | ---------------- | -------------------------------------------------------------------------------------------------------- |
-| `--tokenizer`        | `String`         | Path to `tokenizer.json` used for tokenization.                                                          |
-| `--tokenizer-config` | `String`         | Path to `tokenizer_config.json`.                                                                         |
-| `--endpoint`         | `String`         | Target HTTP endpoint. See **Supported APIs** for examples (e.g., TGI: `http://localhost:8000/generate`). |
-| `--api`, `-a`        | `String`         | LLM API type: `tgi`, `openai`, or `aibrix`.                                                              |
-| `--dataset`, `-d`    | `String`         | Dataset type: `bailian`, `mooncake`, `azure`.                                                            |
-| `--dataset-path`     | `Option<String>` | Path to the dataset file.                                                                                |
-
----
-
-### Request Rate Control
-
-| Argument         | Type          | Default | Description                                                                                                                                                                                  |
-| ---------------- | ------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--scale-factor` | `Option<f64>` | None    | Request rate scaling factor. For example, `2.0` maps **logical time** in the trace to **physical (wall-clock) time** at 2× speed, issuing more requests within the same wall-clock duration. |
-
----
-
-### Concurrency & Runtime
-
-| Argument             | Type            | Default   | Description                                                              |
-| -------------------- | --------------- | --------- | ------------------------------------------------------------------------ |
-| `--num-producer`     | `Option<usize>` | None      | Number of producer threads in `TokenSampler` (recommended: 16).          |
-| `--channel-capacity` | `Option<usize>` | None      | Channel capacity between producers and consumers (recommended: 10240).   |
-| `--threads`          | `Option<usize>` | CPU cores | Number of Tokio runtime worker threads. ~30 threads can achieve 100 QPS. |
-
----
-
-### Output & Logging
-
-| Argument              | Type     | Default              | Description       |
-| --------------------- | -------- | -------------------- | ----------------- |
-| `--output-path`, `-o` | `String` | `./log/output.jsonl` | Output file path. |
-
----
-
-### Runtime Duration
-
-| Argument               | Type  | Default | Description                           |
-| ---------------------- | ----- | ------- | ------------------------------------- |
-| `--time-in-secs`, `-t` | `u64` | `60`    | Replayer runtime duration in seconds. |
-
----
-
-### Platform-specific Arguments
-
-| Argument         | Type             | Description                                        |
-| ---------------- | ---------------- | -------------------------------------------------- |
-| `--model-name`   | `Option<String>` | Model name used by the target inference framework. |
-| `--aibrix-route` | `Option<String>` | AIBrix routing strategy name.                      |
-
----
-
-### SLO Parameters
-
-| Argument     | Type  | Default | Description          |
-| ------------ | ----- | ------- | -------------------- |
-| `--ttft-slo` | `f32` | `5.0`   | TTFT SLO in seconds. |
-| `--tpot-slo` | `f32` | `0.06`  | TPOT SLO in seconds. |
-
-If a request does not complete within:
-
-```
-max(15, TTFT_SLO + TPOT_SLO * output_length)
-```
-
-the connection will be aborted and a timeout will be recorded.
-
----
-
-## Viewing Results
+### 4.Check Results
 
 After execution:
 
 * All results are written to the specified output file
 * Each request produces one line in the **`.jsonl`** file
-
-Example output (OpenAI API):
-
-```text
-{
-    "e_time": "2157",
-    "input_length": "358",
-    "output_length": "54",
-    "s_time": "129",
-    "s_time_drift": "1",
-    "span_time": "2028",
-    "status": "200"
-}
-{...}
-{...}
-...
-```
-
----
-
-## Output Fields
 
 Each line in the `.jsonl` file corresponds to one request and may include:
 
@@ -228,25 +131,18 @@ Each line in the `.jsonl` file corresponds to one request and may include:
 
 (Field availability depends on the API implementation.)
 
----
 
-## Extending API Support
+## Contributing
+We welcome and value any contributions and feedback, please check
+👉 [`docs/extending.md`](docs/extending.md) for how to extend API
 
-1. Create a new file under:
 
-```text
-src/apis/xxx_api.rs
-```
+## Sponsor
 
-2. Define a struct for the new API.
-3. Implement the `LLMApi` trait:
+This project is sponsored by **Alibaba Tongyi Lab**.
 
-   * **`request_json_body`**: Construct the HTTP request body
-   * **`parse_response`**: Parse the HTTP response and extract metrics
-     (refer to `TGIApi` for examples)
-4. In `client.rs`, instantiate
-   `spawn_request_loop_with_timestamp<T>` using the new API struct as the
-   generic parameter.
+## Contact
+For technical questions, bug reports, and feature requests, please use
+GitHub [Issues](https://github.com/blitz-serving/trace-replayer/issues).
 
----
-
+For other inquiries, you may contact the maintainers via GitHub.([Healthcliff-Ding](https://github.com/Healthcliff-Ding))
