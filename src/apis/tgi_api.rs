@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use reqwest::Response;
 
-use super::LLMApi;
-
+use super::{LLMApi, RequestError};
+use std::time::Duration;
 pub struct TGIApi;
 
 impl Copy for TGIApi {}
@@ -14,16 +14,21 @@ impl Clone for TGIApi {
     }
 }
 
+#[async_trait::async_trait]
 impl LLMApi for TGIApi {
     const AIBRIX_PRIVATE_HEADER: bool = false;
 
-    fn request_json_body(prompt: String, output_length: u64) -> String {
+    fn request_json_body(prompt: String, output_length: u64, _stream: bool) -> String {
         let json_body =
             serde_json::json!({"inputs":prompt,"parameters":{"max_new_tokens":output_length}});
         json_body.to_string()
     }
 
-    fn parse_response(response: Response) -> BTreeMap<String, String> {
+    async fn parse_response(
+        response: Response,
+        _stream: bool,
+        _timeout_duration: Duration,
+    ) -> Result<BTreeMap<String, String>, RequestError> {
         let mut map = BTreeMap::new();
         map.insert("status".to_string(), response.status().as_str().to_string());
         if response.status().is_success() {
@@ -156,6 +161,6 @@ impl LLMApi for TGIApi {
                 .to_string();
             map.insert("output_length".to_string(), output_length);
         }
-        map
+        Ok(map)
     }
 }

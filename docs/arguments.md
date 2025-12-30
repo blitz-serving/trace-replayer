@@ -70,3 +70,9 @@ max(15, TTFT_SLO + TPOT_SLO * output_length)
 ```
 
 the connection will be aborted and a timeout will be recorded.
+
+## Streaming
+
+| Argument     |  Type   | Description          |
+| ------------ |  ------ | -------------------- |
+| `--stream` |  `bool` | If send streaming request |

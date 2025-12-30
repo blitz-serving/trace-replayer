@@ -13,12 +13,12 @@ use tokio::{
     fs::File,
     io::{AsyncWriteExt, BufWriter},
     spawn,
-    task::{yield_now, JoinHandle},
+    task::JoinHandle,
     time::sleep,
 };
 
 use crate::{
-    apis::{LLMApi, AIBRIX_ROUTE_STRATEGY},
+    apis::{LLMApi, RequestError, AIBRIX_ROUTE_STRATEGY},
     dataset::LLMTrace,
     timeout_secs_upon_slo,
     token_sampler::TokenSampler,
@@ -41,25 +41,24 @@ async fn post_with_timeout<A: 'static + LLMApi + Send>(
     endpoint: &str,
     json_body: String,
     timeout: Duration,
-) -> Result<Response, reqwest::Error> {
+    stream: bool,
+) -> Result<BTreeMap<String, String>, RequestError> {
+    let mut req = client
+        .post(endpoint)
+        .timeout(timeout)
+        .body(json_body)
+        .header("Content-Type", "application/json");
+
     if A::AIBRIX_PRIVATE_HEADER {
-        Ok(client
-            .post(endpoint)
-            .timeout(timeout)
-            .body(json_body)
-            .header("Content-Type", "application/json")
-            .header("routing-strategy", AIBRIX_ROUTE_STRATEGY.get().unwrap().as_str())
-            .send()
-            .await?)
-    } else {
-        Ok(client
-            .post(endpoint)
-            .timeout(timeout)
-            .body(json_body)
-            .header("Content-Type", "application/json")
-            .send()
-            .await?)
+        req = req.header(
+            "routing-strategy",
+            AIBRIX_ROUTE_STRATEGY.get().unwrap().as_str(),
+        );
     }
+
+    let response = req.send().await.map_err(|e| RequestError::Other(e))?;
+
+    A::parse_response(response, stream, timeout).await
 }
 
 async fn wait_all(handle_rx: flume::Receiver<JoinHandle<()>>, interrupt_flag: Arc<AtomicBool>) {
@@ -80,6 +79,7 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
     interrupt_flag: Arc<AtomicBool>,
     ttft_slo: f32,
     tpot_slo: f32,
+    stream: bool,
 ) -> JoinHandle<Result<(), i32>> {
     static BASETIME: OnceLock<Instant> = OnceLock::new();
     static RETURNCODE: AtomicI32 = AtomicI32::new(0);
@@ -134,7 +134,7 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                 dataset.inflate(data_index, token_sampler.as_ref());
 
             let request_handle = spawn(async move {
-                let json_body = A::request_json_body(prompt, output_length);
+                let json_body = A::request_json_body(prompt, output_length, stream);
                 let s_time = get_timestamp();
                 let s_time_drift = s_time.saturating_sub(next_timestamp);
                 match post_with_timeout::<A>(
@@ -142,13 +142,13 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                     endpoint.as_str(),
                     json_body.to_string(),
                     Duration::from_secs(timeout_secs_upon_slo(output_length, ttft_slo, tpot_slo)),
+                    stream,
                 )
                 .await
                 {
-                    Ok(response) => {
+                    Ok(mut metrics) => {
                         let e_time = get_timestamp();
 
-                        let mut metrics = A::parse_response(response);
                         metrics.insert("s_time".to_string(), s_time.to_string());
                         metrics.insert("s_time_drift".to_string(), s_time_drift.to_string());
                         metrics.insert("e_time".to_string(), e_time.to_string());
@@ -159,7 +159,7 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                         metrics.insert("span_time".to_string(), span_time.to_string());
                         response_sender.send(metrics).unwrap();
                     }
-                    Err(error) if error.is_timeout() => {
+                    Err(RequestError::Timeout) => {
                         let e_time = get_timestamp();
 
                         let mut metrics = BTreeMap::<String, String>::from([(
@@ -176,9 +176,14 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                         metrics.insert("span_time".to_string(), span_time.to_string());
                         response_sender.send(metrics).unwrap();
                     }
-                    Err(error) => {
+                    Err(RequestError::Other(error)) => {
                         tracing::error!(
                             "Request#{data_index}::({input_length}|{output_length}) error: {error}",
+                        );
+                    }
+                    Err(RequestError::StreamErr(error)) => {
+                        tracing::error!(
+                            "Request#{data_index}::({input_length}|{output_length}) stream error: {error}",
                         );
                     }
                 }
@@ -253,7 +258,11 @@ pub fn spawn_request_loop_debug<A: 'static + LLMApi + Send>(
                 let s_time = get_timestamp();
                 let s_time_drift = s_time.saturating_sub(next_timestamp);
 
-                let validate_len = tokenizer.encode(sample.clone(), false).unwrap().get_ids().len();
+                let validate_len = tokenizer
+                    .encode(sample.clone(), false)
+                    .unwrap()
+                    .get_ids()
+                    .len();
                 if validate_len != input_length as usize {
                     tracing::error!("Validation error: {input_length} :> {validate_len}");
                 }
