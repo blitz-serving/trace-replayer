@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 use clap::Parser;
-use request_sim::apis::{OpenAIApi, AIBRIX_ROUTE_STRATEGY};
+use request_sim::apis::{OpenAIApi, AIBRIX_ROUTE_STRATEGY, METRIC_PERCENTILES};
 use request_sim::{
     apis::{TGIApi, MODEL_NAME},
     dataset::{BailianDataset, LLMTrace, MooncakeDataset},
@@ -71,6 +71,10 @@ struct Args {
     #[clap(long, short, default_value = "./log/output.jsonl")]
     output_path: String,
 
+    /// Summary output path (JSON).
+    #[clap(long)]
+    summary_path: Option<String>,
+
     /// Tracing path. Only used by tracing
     #[clap(long)]
     tracing_path: Option<String>,
@@ -98,6 +102,10 @@ struct Args {
     /// Enable streaming mode for API requests
     #[clap(long, default_value_t = false)]
     stream: bool,
+
+    /// Percentiles (comma-separated) to report for latency metrics, e.g. "90,95,99"
+    #[clap(long, value_delimiter = ',', default_value = "90,95,99")]
+    metric_percentile: Vec<u32>,
 }
 
 async fn async_main(args: Args) -> Result<(), i32> {
@@ -113,6 +121,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
         dataset_path,
         scale_factor,
         output_path,
+        summary_path,
         tracing_path: _,
         time_in_secs,
         model_name,
@@ -120,13 +129,36 @@ async fn async_main(args: Args) -> Result<(), i32> {
         ttft_slo,
         tpot_slo,
         stream,
+        metric_percentile,
     } = args;
+
+    let mut metric_percentile = metric_percentile;
+    if metric_percentile.is_empty() {
+        metric_percentile = vec![90, 95, 99];
+    }
+    metric_percentile.sort_unstable();
+    metric_percentile.dedup();
+    for percentile in &metric_percentile {
+        assert!(
+            (1..=100).contains(percentile),
+            "Invalid metric percentile: {percentile}"
+        );
+    }
+    METRIC_PERCENTILES.get_or_init(|| metric_percentile);
 
     let output_file = tokio::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&output_path)
+        .await
+        .unwrap();
+    let summary_path = summary_path.unwrap_or_else(|| format!("{output_path}.summary.json"));
+    let summary_file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&summary_path)
         .await
         .unwrap();
 
@@ -259,7 +291,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
         }
         _ => unimplemented!("Unsupported protocol type"),
     };
-    let reporter_handle = spawn(report_loop(output_file, rx));
+    let reporter_handle = spawn(report_loop(output_file, summary_file, rx));
 
     // start test!
     tokio::time::sleep(tokio::time::Duration::from_secs(time_in_secs)).await;

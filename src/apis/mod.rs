@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 pub static MODEL_NAME: OnceLock<String> = OnceLock::new();
+pub static METRIC_PERCENTILES: OnceLock<Vec<u32>> = OnceLock::new();
 
 pub mod aibrix_api;
 pub mod openai_api;

@@ -1,4 +1,4 @@
-use super::{LLMApi, RequestError, MODEL_NAME};
+use super::{LLMApi, RequestError, METRIC_PERCENTILES, MODEL_NAME};
 use futures_util::TryStreamExt;
 use reqwest::Response;
 use serde_json::json;
@@ -12,6 +12,8 @@ use tokio_util::io::StreamReader;
 
 #[derive(Copy, Clone)]
 pub struct OpenAIApi;
+
+const DEFAULT_PERCENTILES: [u32; 3] = [90, 95, 99];
 
 #[async_trait::async_trait]
 impl LLMApi for OpenAIApi {
@@ -27,7 +29,7 @@ impl LLMApi for OpenAIApi {
                 }
             ],
             "stream": stream,
-            "min_tokens": output_length,
+            "min_tokens": output_length, // 标准的 openAI API 不支持，需测试引擎（如 vLLM）支持
             "max_tokens": output_length,
         });
 
@@ -60,8 +62,8 @@ impl LLMApi for OpenAIApi {
         let mut first_token_time: Option<TokioInstant> = None;
         let mut last_token_time: Option<TokioInstant> = None;
         let mut token_count = 0;
-        let mut tbt_values = Vec::new();
-        let mut tbt_except_first = Vec::new();
+        let mut tbt_values: Vec<f64> = Vec::new();
+        let mut tbt_except_first: Vec<f64> = Vec::new();
         let start_time = TokioInstant::now();
 
         loop {
@@ -93,13 +95,13 @@ impl LLMApi for OpenAIApi {
                             if first_token_time.is_none() {
                                 first_token_time = Some(now);
                                 let first_token_duration =
-                                    now.duration_since(start_time).as_millis() as u64;
+                                    now.duration_since(start_time).as_secs_f64() * 1000.0;
                                 result.insert(
                                     "first_token_time".to_string(),
-                                    first_token_duration.to_string(),
+                                    format!("{first_token_duration:.3}"),
                                 );
                             } else if let Some(last) = last_token_time {
-                                let tbt = now.duration_since(last).as_millis() as u64;
+                                let tbt = now.duration_since(last).as_secs_f64() * 1000.0;
                                 tbt_values.push(tbt);
                                 if token_count > 2 {
                                     tbt_except_first.push(tbt);
@@ -118,60 +120,59 @@ impl LLMApi for OpenAIApi {
 
         if let Some(first) = first_token_time {
             if let Some(last) = last_token_time {
-                let total_time = last.duration_since(first).as_millis() as u64;
-                result.insert("total_time".to_string(), total_time.to_string());
+                let total_time = last.duration_since(first).as_secs_f64() * 1000.0;
+                result.insert("total_time".to_string(), format!("{total_time:.3}"));
             }
         }
 
         if !tbt_except_first.is_empty() {
-            let max_tbt_except_first = *tbt_except_first.iter().max().unwrap();
+            let max_tbt_except_first = tbt_except_first
+                .iter()
+                .copied()
+                .fold(f64::MIN, f64::max);
             result.insert(
                 "max_time_between_tokens_except_first".to_string(),
-                max_tbt_except_first.to_string(),
+                format!("{max_tbt_except_first:.3}"),
             );
         }
 
         if !tbt_values.is_empty() {
-            let max_tbt = *tbt_values.iter().max().unwrap();
-            result.insert("max_time_between_tokens".to_string(), max_tbt.to_string());
+            let max_tbt = tbt_values.iter().copied().fold(f64::MIN, f64::max);
+            result.insert(
+                "max_time_between_tokens".to_string(),
+                format!("{max_tbt:.3}"),
+            );
         }
 
         if !tbt_values.is_empty() {
-            let avg_tbt = (tbt_values.iter().sum::<u64>() as f64 / tbt_values.len() as f64) as u32;
-            result.insert("avg_time_between_tokens".to_string(), avg_tbt.to_string());
+            let avg_tbt = tbt_values.iter().sum::<f64>() / tbt_values.len() as f64;
+            result.insert(
+                "avg_time_between_tokens".to_string(),
+                format!("{avg_tbt:.3}"),
+            );
         }
 
-        // p90_time_between_tokens, p95_time_between_tokens, p99_time_between_tokens
+        // percentile_time_between_tokens
         // need to sort for computing percentage
         if !tbt_values.is_empty() {
             let mut sorted_tbt = tbt_values.clone();
-            sorted_tbt.sort();
+            sorted_tbt.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             let len = sorted_tbt.len();
             if len > 0 {
-                // p90
-                let p90_idx = (len as f64 * 0.9).ceil() as usize - 1;
-                let p90_idx = p90_idx.min(len - 1);
-                result.insert(
-                    "p90_time_between_tokens".to_string(),
-                    sorted_tbt[p90_idx].to_string(),
-                );
-
-                // p95
-                let p95_idx = (len as f64 * 0.95).ceil() as usize - 1;
-                let p95_idx = p95_idx.min(len - 1);
-                result.insert(
-                    "p95_time_between_tokens".to_string(),
-                    sorted_tbt[p95_idx].to_string(),
-                );
-
-                // p99
-                let p99_idx = (len as f64 * 0.99).ceil() as usize - 1;
-                let p99_idx = p99_idx.min(len - 1);
-                result.insert(
-                    "p99_time_between_tokens".to_string(),
-                    sorted_tbt[p99_idx].to_string(),
-                );
+                let percentiles = METRIC_PERCENTILES
+                    .get()
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&DEFAULT_PERCENTILES);
+                for percentile in percentiles {
+                    let idx = (len as f64 * (*percentile as f64 / 100.0)).ceil() as isize - 1;
+                    let idx = idx.max(0) as usize;
+                    let idx = idx.min(len - 1);
+                    result.insert(
+                        format!("p{percentile}_time_between_tokens"),
+                        format!("{:.3}", sorted_tbt[idx]),
+                    );
+                }
             }
         }
 

@@ -37,6 +37,8 @@ This document describes all command-line arguments supported by **Trace-Replayer
 | Argument              | Type     | Default              | Description       |
 | --------------------- | -------- | -------------------- | ----------------- |
 | `--output-path`, `-o` | `String` | `./log/output.jsonl` | Output file path. |
+| `--summary-path` | `Option<String>` | `<output-path>.summary.json` | Summary output file path (JSON). |
+| `--metric-percentile` | `Vec<u32>` | `90,95,99` | Percentiles (comma-separated) to report for latency metrics. |
 
 
 ## Runtime Duration
