@@ -46,10 +46,12 @@ async fn post_with_timeout<A: 'static + LLMApi + Send>(
 ) -> Result<BTreeMap<String, String>, RequestError> {
     let mut req = client
         .post(endpoint)
-        .timeout(timeout)
         .body(json_body)
         .header("Content-Type", "application/json");
 
+    if !stream {
+        req = req.timeout(timeout);
+    }
     if A::AIBRIX_PRIVATE_HEADER {
         req = req.header(
             "routing-strategy",
