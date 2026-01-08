@@ -94,6 +94,10 @@ struct Args {
     /// TPOT SLO in seconds
     #[clap(long, default_value_t = 0.06)]
     tpot_slo: f32,
+
+    /// Enable streaming mode for API requests
+    #[clap(long, default_value_t = false)]
+    stream: bool,
 }
 
 async fn async_main(args: Args) -> Result<(), i32> {
@@ -115,6 +119,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
         aibrix_route,
         ttft_slo,
         tpot_slo,
+        stream,
     } = args;
 
     let output_file = tokio::fs::OpenOptions::new()
@@ -174,6 +179,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
                 interrupt_flag.clone(),
                 ttft_slo,
                 tpot_slo,
+                stream,
             )
         }
         "release-with-debug" => {
@@ -215,6 +221,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
                 interrupt_flag.clone(),
                 ttft_slo,
                 tpot_slo,
+                stream,
             )
         }
         "aibrix" => {
@@ -247,6 +254,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
                 interrupt_flag.clone(),
                 ttft_slo,
                 tpot_slo,
+                stream,
             )
         }
         _ => unimplemented!("Unsupported protocol type"),

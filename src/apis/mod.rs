@@ -12,8 +12,21 @@ pub use aibrix_api::{AIBrixApi, AIBRIX_ROUTE_STRATEGY};
 pub use openai_api::OpenAIApi;
 pub use tgi_api::TGIApi;
 
-pub trait LLMApi: Copy + Clone {
+use std::time::Duration;
+
+pub enum RequestError {
+    Timeout,
+    StreamErr(std::io::Error),
+    Other(reqwest::Error),
+}
+
+#[async_trait::async_trait]
+pub trait LLMApi: Copy + Clone + Send + Sync {
     const AIBRIX_PRIVATE_HEADER: bool;
-    fn request_json_body(prompt: String, output_length: u64) -> String;
-    fn parse_response(response: Response) -> BTreeMap<String, String>;
+    fn request_json_body(prompt: String, output_length: u64, stream: bool) -> String;
+    async fn parse_response(
+        response: Response,
+        stream: bool,
+        timeout_duration: Duration,
+    ) -> Result<BTreeMap<String, String>, RequestError>;
 }

@@ -91,7 +91,6 @@ vllm serve /path/to/Qwen2.5-7B-Instruct --port 8080
 
 # Now init trace-replayer
 path/to/your/repo/target/release/client \
-  --replay-mode \
   --tokenizer /path/to/Qwen2.5-7B-Instruct/tokenizer.json \
   --tokenizer-config /path/to/Qwen2.5-7B-Instruct/tokenizer_config.json \
   --endpoint http://localhost:8080/v1/chat/completions \
@@ -102,7 +101,8 @@ path/to/your/repo/target/release/client \
   --time-in-secs 1200 \
   --num-producer 32 \
   --channel-capacity 40960 \
-  --output-path /path/to/client.jsonl
+  --output-path /path/to/client.jsonl \
+  --model-name <MODEL_NAME IN VLLM>
 ```
 
 For a complete list of command-line arguments, please refer to  
