@@ -203,7 +203,7 @@ impl TokenSampler {
                 }
                 Err(channel::TryRecvError::Empty) => {}
                 Err(channel::TryRecvError::Disconnected) => {
-                    eprintln!("Producer-{id} snd_rx disconnected, exiting");
+                    tracing::debug!("Producer-{id} snd_rx disconnected, exiting");
                     break;
                 }
             }
@@ -236,19 +236,19 @@ impl TokenSampler {
                             continue;
                         }
                         Err(channel::RecvTimeoutError::Disconnected) => {
-                            eprintln!("Producer-{id} notify_rx disconnected, exiting");
+                            tracing::debug!("Producer-{id} notify_rx disconnected, exiting");
                             break;
                         }
                     }
                 }
                 Err(channel::TrySendError::Disconnected(_)) => {
                     // receiver closed -> exit
-                    eprintln!("Producer-{id} tx disconnected, exiting");
+                    tracing::debug!("Producer-{id} tx disconnected, exiting");
                     break;
                 }
             }
         }
-        eprintln!("Producer-{id} exited");
+        tracing::debug!("Producer-{id} exited");
     }
 
     fn generate_block(tokenizer: &Tokenizer, splitter: &[String], n: usize) -> String {
@@ -328,7 +328,7 @@ impl TokenSampler {
                 }
                 Err(channel::TryRecvError::Empty) => {}
                 Err(channel::TryRecvError::Disconnected) => {
-                    eprintln!("Producer-{id} snd_rx disconnected, exiting");
+                    tracing::debug!("Producer-{id} snd_rx disconnected, exiting");
                     break;
                 }
             }
@@ -371,19 +371,19 @@ impl TokenSampler {
                             continue;
                         }
                         Err(channel::RecvTimeoutError::Disconnected) => {
-                            eprintln!("Producer-{id} notify_rx disconnected, exiting");
+                            tracing::debug!("Producer-{id} notify_rx disconnected, exiting");
                             break;
                         }
                     }
                 }
                 Err(channel::TrySendError::Disconnected(_)) => {
                     // receiver closed -> exit
-                    eprintln!("Producer-{id} tx disconnected, exiting");
+                    tracing::debug!("Producer-{id} tx disconnected, exiting");
                     break;
                 }
             }
         }
-        eprintln!("Producer-{id} exited");
+        tracing::debug!("Producer-{id} exited");
     }
 
     fn generate_block_v2(
