@@ -2,12 +2,13 @@ use std::{
     collections::BTreeMap,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicI32, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering},
         Arc, OnceLock,
     },
     time::{Duration, Instant},
 };
 
+use futures_util::stream::Count;
 use reqwest::Response;
 use tokio::{
     fs::File,
@@ -17,13 +18,13 @@ use tokio::{
     time::sleep,
 };
 
+use crate::apis::METRIC_PERCENTILES;
 use crate::{
     apis::{LLMApi, RequestError, AIBRIX_ROUTE_STRATEGY},
     dataset::LLMTrace,
     timeout_secs_upon_slo,
     token_sampler::TokenSampler,
 };
-use crate::apis::METRIC_PERCENTILES;
 
 #[allow(dead_code)]
 async fn request(endpoint: &str, json_body: String) -> Result<Response, reqwest::Error> {
@@ -83,6 +84,7 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
     ttft_slo: f32,
     tpot_slo: f32,
     stream: bool,
+    early_stop_error_threshold: Option<u32>,
 ) -> JoinHandle<Result<(), i32>> {
     static BASETIME: OnceLock<Instant> = OnceLock::new();
     static RETURNCODE: AtomicI32 = AtomicI32::new(0);
@@ -107,6 +109,8 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
         }
     });
 
+    let error_count = Arc::new(AtomicU32::new(0));
+
     spawn(async move {
         let data_iter = dataset.iter();
         let http_client = reqwest::Client::builder()
@@ -118,8 +122,20 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
             .unwrap();
         let endpoint = Arc::new(endpoint);
         for data_index in data_iter {
+            let error_count = Arc::clone(&error_count);
             if interrupt_flag.load(Ordering::Relaxed) {
                 break;
+            }
+
+            if let Some(threshold) = early_stop_error_threshold {
+                if threshold <= error_count.load(Ordering::Relaxed) {
+                    tracing::error!(
+                        "Request error accumulated more than threshold: {}, exit client",
+                        threshold
+                    );
+                    interrupt_flag.store(true, Ordering::SeqCst); // terminate test
+                    break;
+                }
             }
             let client = http_client.clone();
             let endpoint = endpoint.clone();
@@ -184,16 +200,19 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                             format!("{span_time:.3}"),
                         );
                         response_sender.send(metrics).unwrap();
+                        error_count.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(RequestError::Other(error)) => {
                         tracing::error!(
                             "Request#{data_index}::({input_length}|{output_length}) error: {error}",
                         );
+                        error_count.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(RequestError::StreamErr(error)) => {
                         tracing::error!(
                             "Request#{data_index}::({input_length}|{output_length}) stream error: {error}",
                         );
+                        error_count.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             });
