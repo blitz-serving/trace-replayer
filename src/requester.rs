@@ -113,7 +113,7 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
             .pool_max_idle_per_host(32)
             .pool_idle_timeout(Duration::from_secs(30))
             .no_proxy()
-            .timeout(Duration::from_secs(15)) // default timeout, can be overrided
+            // .timeout(Duration::from_secs(15)) // default timeout, can be overrided
             .build()
             .unwrap();
         let endpoint = Arc::new(endpoint);
