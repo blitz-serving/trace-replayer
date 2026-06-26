@@ -25,46 +25,31 @@ impl TokenSeparater {
 
         if let Some(class) = config_json.get("tokenizer_class") {
             if class.as_str() == Some("Qwen2Tokenizer") {
-                assert_eq!(
-                    config_json
-                        .get("added_tokens_decoder")
-                        .unwrap()
-                        .get("151643")
-                        .unwrap()
-                        .get("content")
-                        .unwrap()
-                        .as_str()
-                        .unwrap(),
-                    "<|endoftext|>"
-                );
-                assert_eq!(
-                    config_json
-                        .get("added_tokens_decoder")
-                        .unwrap()
-                        .get("151644")
-                        .unwrap()
-                        .get("content")
-                        .unwrap()
-                        .as_str()
-                        .unwrap(),
-                    "<|im_start|>"
-                );
-                assert_eq!(
-                    config_json
-                        .get("added_tokens_decoder")
-                        .unwrap()
-                        .get("151645")
-                        .unwrap()
-                        .get("content")
-                        .unwrap()
-                        .as_str()
-                        .unwrap(),
-                    "<|im_end|>"
-                );
+                // Resolve special-token IDs dynamically from
+                // added_tokens_decoder by their content. Qwen2/2.5 and Qwen3.x
+                // all report tokenizer_class == "Qwen2Tokenizer" but use
+                // different IDs (e.g. <|endoftext|> is 151643 on Qwen2.5 but
+                // 248044 on Qwen3.5), so hardcoding the IDs is wrong.
+                let atd = config_json
+                    .get("added_tokens_decoder")
+                    .and_then(|v| v.as_object())
+                    .expect("tokenizer_config missing added_tokens_decoder object");
+                let find_id = |content: &str| -> u32 {
+                    atd.iter()
+                        .find(|(_, v)| {
+                            v.get("content").and_then(|c| c.as_str()) == Some(content)
+                        })
+                        .unwrap_or_else(|| {
+                            panic!("special token {content} not found in added_tokens_decoder")
+                        })
+                        .0
+                        .parse::<u32>()
+                        .expect("added_tokens_decoder key is not a valid u32 token id")
+                };
                 return TokenSeparater {
-                    bos_token: (151644, "<|im_start|>".to_owned()),
-                    eos_token: (151645, "<|im_end|>".to_owned()),
-                    pad_token: (151643, "<|endoftext|>".to_owned()),
+                    bos_token: (find_id("<|im_start|>"), "<|im_start|>".to_owned()),
+                    eos_token: (find_id("<|im_end|>"), "<|im_end|>".to_owned()),
+                    pad_token: (find_id("<|endoftext|>"), "<|endoftext|>".to_owned()),
                 };
             } else {
                 unimplemented!("Currently support Qwen2/Qwen2.5 class model");
